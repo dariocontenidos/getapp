@@ -733,25 +733,36 @@ async function syncToCloud(){
   }catch(e){console.error('syncTo:',e);refreshSyncDots('err');}
 }
 
-async function syncFrom(){
+let fbListener=null;
+function syncFrom(){
   if(!db||!syncON)return;
   const code=localStorage.getItem('sync_code');
-  try{
-    refreshSyncDots('busy');
-    const snap=await db.ref(`getapp/${code}`).get();
-    if(snap.exists()){
-      const cloud=snap.val();
-      const local=getStore();
-      const merged={...cloud.data||{}};
-      const today=TODAY();
-      if(local[today])merged[today]=local[today];
-      setStore(merged);
-      if(cloud.ts)localStorage.setItem('last_sync',cloud.ts);
-    }
-    refreshSyncDots('ok');
-    updateSyncModal();
-    updateHome();
-  }catch(e){console.error('syncFrom:',e);refreshSyncDots('err');}
+  // Apagar listener anterior si existe
+  if(fbListener){db.ref(`getapp/${code}`).off('value',fbListener);fbListener=null;}
+  refreshSyncDots('busy');
+  fbListener=db.ref(`getapp/${code}`).on('value',snap=>{
+    try{
+      if(snap.exists()){
+        const cloud=snap.val();
+        const local=getStore();
+        // Merge: prioridad a datos locales del día de hoy
+        const merged={...cloud.data||{}};
+        const today=TODAY();
+        if(local[today])merged[today]=local[today];
+        setStore(merged);
+        if(cloud.ts)localStorage.setItem('last_sync',cloud.ts);
+      }
+      refreshSyncDots('ok');
+      updateSyncModal();
+      updateHome();
+      // Refrescar pantalla activa
+      const active=document.querySelector('.screen.active');
+      if(active){
+        if(active.id==='s-progreso')renderProg();
+        if(active.id==='s-reportes')renderRep();
+      }
+    }catch(e){console.error('syncFrom:',e);refreshSyncDots('err');}
+  },e=>{console.error('fbListener:',e);refreshSyncDots('err');});
 }
 
 function refreshSyncDots(state){
