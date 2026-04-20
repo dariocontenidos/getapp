@@ -721,45 +721,62 @@ function initFB(){
   }catch(e){console.error('FB init:',e);refreshSyncDots('err');}
 }
 
+// Merge ítem a ítem: gana el timestamp más reciente
+function mergeData(local,cloud){
+  const res=JSON.parse(JSON.stringify(cloud));
+  Object.keys(local).forEach(date=>{
+    if(!res[date])res[date]={};
+    Object.keys(local[date]).forEach(mKey=>{
+      if(!res[date][mKey])res[date][mKey]={};
+      Object.keys(local[date][mKey]).forEach(iKey=>{
+        const loc=local[date][mKey][iKey];
+        const cld=res[date][mKey][iKey];
+        if(!cld||(loc.ts||0)>=(cld.ts||0))res[date][mKey][iKey]=loc;
+      });
+    });
+  });
+  return res;
+}
+
+let isSyncing=false;
 async function syncToCloud(){
-  if(!db||!syncON)return;
+  if(!db||!syncON||isSyncing)return;
   const code=localStorage.getItem('sync_code');
   try{
+    isSyncing=true;
     refreshSyncDots('busy');
-    await db.ref(`getapp/${code}`).set({data:getStore(),ts:Date.now()});
+    await db.ref('getapp/'+code+'/data').set(getStore());
+    await db.ref('getapp/'+code+'/ts').set(Date.now());
     localStorage.setItem('last_sync',Date.now());
     refreshSyncDots('ok');
     updateSyncModal();
   }catch(e){console.error('syncTo:',e);refreshSyncDots('err');}
+  finally{isSyncing=false;}
 }
 
 let fbListener=null;
 function syncFrom(){
   if(!db||!syncON)return;
   const code=localStorage.getItem('sync_code');
-  // Apagar listener anterior si existe
-  if(fbListener){db.ref(`getapp/${code}`).off('value',fbListener);fbListener=null;}
+  if(fbListener){db.ref('getapp/'+code).off('value',fbListener);fbListener=null;}
   refreshSyncDots('busy');
-  fbListener=db.ref(`getapp/${code}`).on('value',snap=>{
+  fbListener=db.ref('getapp/'+code).on('value',snap=>{
+    if(isSyncing)return;
     try{
       if(snap.exists()){
         const cloud=snap.val();
-        const local=getStore();
-        // Merge: prioridad a datos locales del día de hoy
-        const merged={...cloud.data||{}};
-        const today=TODAY();
-        if(local[today])merged[today]=local[today];
+        const merged=mergeData(getStore(),cloud.data||{});
         setStore(merged);
         if(cloud.ts)localStorage.setItem('last_sync',cloud.ts);
       }
       refreshSyncDots('ok');
       updateSyncModal();
       updateHome();
-      // Refrescar pantalla activa
       const active=document.querySelector('.screen.active');
       if(active){
         if(active.id==='s-progreso')renderProg();
         if(active.id==='s-reportes')renderRep();
+        if(active.id==='s-module'&&curMod)openMod(curMod);
       }
     }catch(e){console.error('syncFrom:',e);refreshSyncDots('err');}
   },e=>{console.error('fbListener:',e);refreshSyncDots('err');});
